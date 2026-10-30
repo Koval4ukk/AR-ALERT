@@ -48,27 +48,21 @@
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
-        <!-- ОНОВЛЕНИЙ РОЗШИРЕНИЙ HUD -->
+        <!-- HUD (Інформаційна панель) -->
         <div id="targetHUD" class="absolute top-[55%] left-1/2 -translate-x-1/2 bg-black/85 border border-red-500 rounded-lg p-4 w-[90%] max-w-sm hidden flex-col items-center shadow-[0_0_20px_rgba(255,0,0,0.7)]">
             <div id="hudIcon" class="text-4xl mb-1">🎯</div>
             <div id="hudTitle" class="text-red-500 font-bold text-xl uppercase tracking-wider text-center">Ціль</div>
             <div id="hudDesc" class="text-xs text-amber-400 text-center mb-4 min-h-[32px] w-full border-b border-gray-700 pb-2">Аналіз сигнатури...</div>
 
             <div class="grid grid-cols-2 gap-x-6 gap-y-2 w-full text-sm">
-                <div class="text-gray-400">Відстань:</div> 
-                <div id="hudDist" class="font-mono font-bold text-right text-white">--</div>
-                
-                <div class="text-gray-400">Швидкість:</div> 
-                <div id="hudSpeed" class="font-mono font-bold text-right text-white">--</div>
-                
-                <div class="text-gray-400">Кількість:</div> 
-                <div id="hudCount" class="font-mono font-bold text-right text-white">--</div>
-                
-                <div class="text-gray-400">Похибка:</div> 
-                <div id="hudAccuracy" class="font-mono font-bold text-right text-white">--</div>
+                <div class="text-gray-400">Відстань:</div> <div id="hudDist" class="font-mono font-bold text-right text-white">--</div>
+                <div class="text-gray-400">Швидкість:</div> <div id="hudSpeed" class="font-mono font-bold text-right text-white">--</div>
+                <div class="text-gray-400">Кількість:</div> <div id="hudCount" class="font-mono font-bold text-right text-white">--</div>
+                <div class="text-gray-400">Похибка:</div> <div id="hudAccuracy" class="font-mono font-bold text-right text-white">--</div>
             </div>
         </div>
 
+        <!-- Кнопка симуляції та Дебаг -->
         <div class="absolute top-4 left-4 pointer-events-auto flex flex-col gap-2">
             <button id="btnSimulate" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
                 Симулювати ціль (15км)
@@ -76,6 +70,12 @@
             <div id="debugInfo" class="bg-black/60 text-[10px] p-2 rounded max-w-[150px] font-mono opacity-70">
                 Очікування старту...
             </div>
+        </div>
+
+        <!-- НОВЕ: МІНІ-КАРТА (РАДАР) -->
+        <div class="absolute bottom-6 right-4 w-32 h-32 bg-black/60 border border-slate-700 rounded-full shadow-lg overflow-hidden backdrop-blur-md pointer-events-none">
+            <canvas id="radarCanvas" width="128" height="128" class="w-full h-full"></canvas>
+            <div class="absolute bottom-2 w-full text-center text-[9px] text-gray-400 font-mono tracking-widest opacity-80">50 км</div>
         </div>
     </div>
 
@@ -90,7 +90,7 @@
     </div>
 
     <script>
-        window.onerror = function(msg, url, line) { alert(`ПОМИЛКА: ${msg}`); return false; };
+        window.onerror = function(msg) { alert(`ПОМИЛКА: ${msg}`); return false; };
         
         let myLat = 0, myLon = 0, phoneHeading = 0;
         let activeThreats = [], fakeTarget = null, isLocked = false;
@@ -102,6 +102,14 @@
         const arrowLeft = document.getElementById('arrowLeft');
         const arrowRight = document.getElementById('arrowRight');
         const debugInfo = document.getElementById('debugInfo');
+        
+        // Налаштування Canvas для міні-карти
+        const radarCanvas = document.getElementById('radarCanvas');
+        const ctx = radarCanvas.getContext('2d');
+        const cx = radarCanvas.width / 2;
+        const cy = radarCanvas.height / 2;
+        const maxRadarKm = 50; // Максимальний радіус радара (50 км)
+        const radarRadius = cx - 10; // Відступ від країв
 
         window.addEventListener('deviceorientation', (e) => { if (e.webkitCompassHeading !== undefined) phoneHeading = e.webkitCompassHeading; }, true);
         window.addEventListener('deviceorientationabsolute', (e) => { if (e.alpha !== null) phoneHeading = (360 - e.alpha) % 360; }, true);
@@ -163,22 +171,13 @@
             if (myLat === 0) return alert("Чекаємо GPS...");
             const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 15); 
             const nowIso = new Date().toISOString();
-            
-            // ВИПРАВЛЕНО: Додано confirmedAt та velocity.bearingDeg для роботи predict()
             const headingToMe = (phoneHeading + 180) % 360;
             fakeTarget = {
                 id: 'sim_1', type: 'missile', lat: targetPos.lat, lon: targetPos.lon,
-                heading: headingToMe, 
-                velocity: { speedKmh: 800, bearingDeg: headingToMe }, 
-                title: "СИМУЛЯЦІЯ (Ракета)",
-                explanationShort: "Навчальна крилата ракета швидко летить на вас",
-                count: 3,
-                uncertaintyKm: 2,
-                updatedAt: nowIso,
-                confirmedAt: nowIso, 
-                status: 'active'
+                heading: headingToMe, velocity: { speedKmh: 800, bearingDeg: headingToMe }, 
+                title: "СИМУЛЯЦІЯ (Ракета)", explanationShort: "Навчальна ракета курсом на вас",
+                count: 1, uncertaintyKm: 2, updatedAt: nowIso, confirmedAt: nowIso, status: 'active'
             };
-            
             setTimeout(() => { fakeTarget = null; }, 30000);
         });
 
@@ -191,12 +190,55 @@
             if (fakeTarget) allThreats.push(fakeTarget);
 
             let closestThreat = null, minDistance = Infinity, closestPredicted = null;
+            
+            // Очищення міні-карти
+            ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+            
+            // Малюємо сітку міні-карти (кільця)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, radarRadius * 0.5, 0, 2 * Math.PI); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radarRadius, 0, 2 * Math.PI); ctx.stroke();
+
+            // Малюємо конус зору користувача (погляд завжди ВГОРУ екрана радара)
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            // -90 градусів у Canvas це "Верх". Кут зору ±15 градусів.
+            ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (15 * Math.PI/180), -Math.PI/2 + (15 * Math.PI/180));
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fill();
+
+            // Точка користувача (Центр)
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = '#3b82f6'; // Синій колір
+            ctx.fill();
 
             for (const t of allThreats) {
                 const p = NEPTUN.predict(t, now);
-                if (!p || isNaN(p.lat)) continue; // Захист, якщо SDK не зміг передбачити ціль
+                if (!p || isNaN(p.lat)) continue; 
                 
                 const distKm = NEPTUN.distanceKm(myLat, myLon, p.lat, p.lon);
+                const targetBearing = getBearing(myLat, myLon, p.lat, p.lon);
+                let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
+                
+                // --- ВІДМАЛЬОВКА НА МІНІ-КАРТІ ---
+                let scale = distKm / maxRadarKm;
+                if (scale > 1) scale = 1; // Якщо далі 50км, малюємо на краю
+                
+                // Переводимо відносний кут у радіани (-90 це щоб "Вперед" було вгорі)
+                const rad = (deltaAngle - 90) * Math.PI / 180;
+                const px = cx + (scale * radarRadius) * Math.cos(rad);
+                const py = cy + (scale * radarRadius) * Math.sin(rad);
+                
+                const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red' };
+                
+                ctx.beginPath();
+                ctx.arc(px, py, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = meta.color;
+                ctx.fill();
+                
+                // --- ЛОГІКА ЗАХОПЛЕННЯ ПРИЦІЛУ ---
                 if (distKm < minDistance) {
                     minDistance = distKm; closestThreat = t; closestPredicted = p;
                 }
@@ -224,15 +266,9 @@
                 document.getElementById('hudTitle').textContent = closestThreat.title || meta.title;
                 document.getElementById('hudTitle').style.color = meta.color;
                 
-                // Телеметрія
                 document.getElementById('hudDesc').textContent = closestThreat.explanationShort || "Деталі невідомі";
                 document.getElementById('hudDist').textContent = minDistance < 1 ? Math.round(minDistance * 1000) + ' м' : minDistance.toFixed(1) + ' км';
-                
-                // Безпечна перевірка швидкості
-                document.getElementById('hudSpeed').textContent = (closestThreat.velocity && closestThreat.velocity.speedKmh) 
-                    ? closestThreat.velocity.speedKmh + ' км/год' 
-                    : 'Н/Д';
-                
+                document.getElementById('hudSpeed').textContent = (closestThreat.velocity && closestThreat.velocity.speedKmh) ? closestThreat.velocity.speedKmh + ' км/год' : 'Н/Д';
                 document.getElementById('hudCount').textContent = closestThreat.count > 1 ? closestThreat.count + ' шт.' : '1 шт.';
                 document.getElementById('hudAccuracy').textContent = closestThreat.uncertaintyKm ? '±' + closestThreat.uncertaintyKm + ' км' : 'Н/Д';
                 
