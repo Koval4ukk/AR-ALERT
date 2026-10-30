@@ -38,23 +38,11 @@
         .nav-arrow.right { right: 20px; }
         @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
         
-        /* Сині повзунки (Зум та FOV) */
-        .slider-blue::-webkit-slider-thumb {
-            -webkit-appearance: none; appearance: none;
-            width: 14px; height: 14px; border-radius: 50%; background: #3b82f6; cursor: pointer;
-        }
-        .slider-blue::-moz-range-thumb {
-            width: 14px; height: 14px; border-radius: 50%; background: #3b82f6; cursor: pointer; border: none;
-        }
+        .slider-blue::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #3b82f6; cursor: pointer; }
+        .slider-blue::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #3b82f6; cursor: pointer; border: none; }
         
-        /* Червоний повзунок (Радіус виявлення) */
-        .slider-red::-webkit-slider-thumb {
-            -webkit-appearance: none; appearance: none;
-            width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer;
-        }
-        .slider-red::-moz-range-thumb {
-            width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer; border: none;
-        }
+        .slider-red::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer; }
+        .slider-red::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer; border: none; }
     </style>
 </head>
 <body class="text-white relative">
@@ -66,7 +54,6 @@
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
-        <!-- HUD Телеметрії -->
         <div id="targetHUD" class="absolute top-[55%] left-1/2 -translate-x-1/2 bg-black/85 border border-red-500 rounded-lg p-4 w-[90%] max-w-sm hidden flex-col items-center shadow-[0_0_20px_rgba(255,0,0,0.7)]">
             <div id="hudIcon" class="text-4xl mb-1">🎯</div>
             <div id="hudTitle" class="text-red-500 font-bold text-xl uppercase tracking-wider text-center mb-3 border-b border-gray-700 w-full pb-2">Ціль</div>
@@ -83,7 +70,6 @@
             </div>
         </div>
 
-        <!-- Дебаг та симуляція -->
         <div class="absolute top-4 left-4 pointer-events-auto flex flex-col gap-2">
             <button id="btnSimulate" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
                 Симулювати (20км)
@@ -93,28 +79,24 @@
             </div>
         </div>
 
-        <!-- Міні-карта та Панель управління (Верхній правий кут) -->
         <div class="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-auto">
             <div class="w-32 h-32 bg-black/60 border border-slate-700 rounded-full shadow-lg overflow-hidden backdrop-blur-md relative pointer-events-none">
                 <canvas id="radarCanvas" width="128" height="128" class="w-full h-full"></canvas>
             </div>
             
             <div class="flex flex-col gap-2 w-36 bg-black/60 p-3 rounded-lg border border-slate-700 backdrop-blur-md">
-                <!-- Зум радара -->
                 <div>
                     <div class="flex justify-between text-[10px] text-gray-400 font-mono mb-1">
                         <span>🔍 Карта</span><span id="radarLabel">50 км</span>
                     </div>
                     <input type="range" id="radarZoom" min="5" max="1000" value="50" step="5" class="slider-blue w-full h-1 bg-gray-600 rounded-lg appearance-none outline-none">
                 </div>
-                <!-- Кут огляду (FOV) -->
                 <div>
                     <div class="flex justify-between text-[10px] text-gray-400 font-mono mb-1">
                         <span>👁 FOV</span><span id="fovLabel">30°</span>
                     </div>
                     <input type="range" id="fovSlider" min="10" max="120" value="30" step="5" class="slider-blue w-full h-1 bg-gray-600 rounded-lg appearance-none outline-none">
                 </div>
-                <!-- Радіус виявлення (Захоплення) -->
                 <div>
                     <div class="flex justify-between text-[10px] text-red-400 font-mono mb-1">
                         <span>🎯 Захоплення</span><span id="detLabel">30 км</span>
@@ -125,7 +107,6 @@
         </div>
     </div>
 
-    <!-- Екран дозволів -->
     <div id="permissionScreen" class="absolute inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6 text-center">
         <h1 class="text-2xl font-bold mb-4">NEPTUN AR Radar</h1>
         <p class="text-sm text-slate-300 mb-6 max-w-sm">Для роботи системи необхідний доступ до компаса, камери та GPS.</p>
@@ -157,19 +138,31 @@
         
         let maxRadarKm = 50; 
         let currentFov = 30; 
-        let detectionRadiusKm = 30; // Нова змінна: Радіус виявлення (захоплення)
+        let detectionRadiusKm = 30; 
         
-        document.getElementById('radarZoom').addEventListener('input', (e) => {
+        const radarZoom = document.getElementById('radarZoom');
+        const detSlider = document.getElementById('detSlider');
+
+        radarZoom.addEventListener('input', (e) => {
             maxRadarKm = parseInt(e.target.value);
             document.getElementById('radarLabel').textContent = maxRadarKm + ' км';
         });
+        
         document.getElementById('fovSlider').addEventListener('input', (e) => {
             currentFov = parseInt(e.target.value);
             document.getElementById('fovLabel').textContent = currentFov + '°';
         });
-        document.getElementById('detSlider').addEventListener('input', (e) => {
+        
+        detSlider.addEventListener('input', (e) => {
             detectionRadiusKm = parseInt(e.target.value);
             document.getElementById('detLabel').textContent = detectionRadiusKm + ' км';
+            
+            // Авто-розширення карти, якщо радіус захоплення більший за видимість
+            if (detectionRadiusKm > maxRadarKm) {
+                maxRadarKm = detectionRadiusKm;
+                radarZoom.value = maxRadarKm;
+                document.getElementById('radarLabel').textContent = maxRadarKm + ' км';
+            }
         });
 
         window.addEventListener('deviceorientation', (e) => { if (e.webkitCompassHeading !== undefined) phoneHeading = e.webkitCompassHeading; }, true);
@@ -234,7 +227,7 @@
 
         document.getElementById('btnSimulate').addEventListener('click', () => {
             if (myLat === 0) return alert("Чекаємо GPS...");
-            const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 20); // Створюємо ціль на 20 км
+            const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 20); 
             const nowIso = new Date().toISOString();
             const headingToMe = (phoneHeading + 180) % 360;
             fakeTarget = {
@@ -262,28 +255,30 @@
             
             ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
             
-            // Базова сітка міні-карти
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius * 0.5, 0, 2 * Math.PI); ctx.stroke();
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius, 0, 2 * Math.PI); ctx.stroke();
 
-            // Червоне пунктирне кільце (Радіус виявлення)
+            // ВИПРАВЛЕНЕ: Червоне пунктирне кільце (Радіус виявлення)
             const detScale = detectionRadiusKm / maxRadarKm;
+            // Притискаємо лінію до краю, якщо радіус більший за видиму карту
+            const drawRadius = Math.min(detScale * radarRadius, radarRadius);
+            
             ctx.beginPath();
-            ctx.arc(cx, cy, detScale * radarRadius, 0, 2 * Math.PI);
-            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; // Червоний колір
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]); // Пунктир
+            ctx.arc(cx, cy, drawRadius, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+            // Робимо лінію товщою, якщо вона притиснута до краю (як попередження)
+            ctx.lineWidth = (detScale > 1) ? 3 : 1.5;
+            ctx.setLineDash([4, 4]);
             ctx.stroke();
-            ctx.setLineDash([]); // Скидаємо пунктир
+            ctx.setLineDash([]);
 
-            // Білий конус зору (FOV)
+            // Білий конус
             ctx.beginPath();
             ctx.moveTo(cx, cy);
             ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (halfFov * Math.PI/180), -Math.PI/2 + (halfFov * Math.PI/180));
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; ctx.fill();
 
-            // Синя точка (користувач)
             ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI); ctx.fillStyle = '#3b82f6'; ctx.fill();
 
             for (const t of allThreats) {
@@ -303,32 +298,22 @@
                 
                 const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red' };
                 
-                // ВІДМАЛЬОВКА ЦІЛІ НА РАДАРІ
                 ctx.beginPath(); 
                 ctx.arc(px, py, 4, 0, 2 * Math.PI); 
                 
-                // Якщо ціль ЗА межами радіусу виявлення - вона сіра (просто бачимо, але не наводимось)
                 if (distKm > detectionRadiusKm) {
-                    ctx.fillStyle = 'rgba(156, 163, 175, 0.5)'; // Сірий колір
+                    ctx.fillStyle = 'rgba(156, 163, 175, 0.5)'; // Сірий (поза зоною виявлення)
                 } else {
-                    ctx.fillStyle = meta.color;
+                    ctx.fillStyle = meta.color; // Активний
                     
-                    // ЛОГІКА ЗАХОПЛЕННЯ ПРАЦЮЄ ТІЛЬКИ ДЛЯ ЦІЛЕЙ В МЕЖАХ РАДІУСУ ВИЯВЛЕННЯ
-                    if (distKm < minDistOverall) { 
-                        minDistOverall = distKm; 
-                        closestOverall = { threat: t, predicted: p, delta: deltaAngle }; 
-                    }
-                    if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) { 
-                        minDistInFov = distKm; 
-                        closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm }; 
-                    }
+                    if (distKm < minDistOverall) { minDistOverall = distKm; closestOverall = { threat: t, predicted: p, delta: deltaAngle }; }
+                    if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) { minDistInFov = distKm; closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm }; }
                 }
                 ctx.fill();
             }
 
             debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Всіх цілей: ${allThreats.length}`;
 
-            // ОНОВЛЕННЯ HUD І ПРИЦІЛУ
             if (closestInFov) {
                 if (!isLocked) {
                     isLocked = true;
@@ -361,7 +346,6 @@
                 
             } else if (closestOverall) {
                 resetUI();
-                // Навігація вказує на найближчу ціль, що знаходиться в зоні виявлення, але поза FOV
                 if (closestOverall.delta < 0) arrowLeft.style.display = 'block'; else arrowRight.style.display = 'block';
             } else {
                 resetUI();
