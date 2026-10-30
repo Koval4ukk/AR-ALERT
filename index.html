@@ -249,4 +249,13 @@
 
         function resetUI() {
             isLocked = false;
-            ui
+            uiLayer.classList.remove('locked-on');
+            crosshair.classList.remove('active');
+            targetHUD.classList.add('hidden');
+            targetHUD.classList.remove('flex');
+            arrowLeft.style.display = 'none';
+            arrowRight.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
