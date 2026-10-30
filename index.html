@@ -38,14 +38,14 @@
         .nav-arrow.right { right: 20px; }
         @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
         
-        /* Стилізація повзунка масштабу */
+        /* Стилізація повзунків */
         input[type=range]::-webkit-slider-thumb {
             -webkit-appearance: none; appearance: none;
-            width: 16px; height: 16px; border-radius: 50%; 
+            width: 14px; height: 14px; border-radius: 50%; 
             background: #3b82f6; cursor: pointer;
         }
         input[type=range]::-moz-range-thumb {
-            width: 16px; height: 16px; border-radius: 50%; 
+            width: 14px; height: 14px; border-radius: 50%; 
             background: #3b82f6; cursor: pointer; border: none;
         }
     </style>
@@ -59,14 +59,15 @@
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
-        <!-- HUD (Інформаційна панель) -->
+        <!-- Оновлений HUD -->
         <div id="targetHUD" class="absolute top-[55%] left-1/2 -translate-x-1/2 bg-black/85 border border-red-500 rounded-lg p-4 w-[90%] max-w-sm hidden flex-col items-center shadow-[0_0_20px_rgba(255,0,0,0.7)]">
             <div id="hudIcon" class="text-4xl mb-1">🎯</div>
-            <div id="hudTitle" class="text-red-500 font-bold text-xl uppercase tracking-wider text-center">Ціль</div>
-            <div id="hudDesc" class="text-xs text-amber-400 text-center mb-4 min-h-[32px] w-full border-b border-gray-700 pb-2">Аналіз сигнатури...</div>
+            <div id="hudTitle" class="text-red-500 font-bold text-xl uppercase tracking-wider text-center mb-3 border-b border-gray-700 w-full pb-2">Ціль</div>
 
-            <div class="grid grid-cols-2 gap-x-6 gap-y-2 w-full text-sm">
-                <div class="text-gray-400">Локація:</div> <div id="hudLoc" class="font-bold text-right text-white truncate max-w-[140px] ml-auto">--</div>
+            <!-- Таблиця телеметрії -->
+            <div class="grid grid-cols-[80px_1fr] gap-x-4 gap-y-2 w-full text-sm">
+                <div class="text-gray-400">Локація:</div> <div id="hudLoc" class="font-bold text-right text-white truncate w-full">--</div>
+                <div class="text-gray-400">Курс:</div> <div id="hudCourse" class="font-bold text-right text-amber-400 truncate w-full text-[12px]">--</div>
                 <div class="text-gray-400">Відстань:</div> <div id="hudDist" class="font-mono font-bold text-right text-white">--</div>
                 <div class="text-gray-400">Швидкість:</div> <div id="hudSpeed" class="font-mono font-bold text-right text-white">--</div>
                 <div class="text-gray-400">Кількість:</div> <div id="hudCount" class="font-mono font-bold text-right text-white">--</div>
@@ -74,24 +75,37 @@
             </div>
         </div>
 
-        <!-- Кнопка симуляції та Дебаг -->
         <div class="absolute top-4 left-4 pointer-events-auto flex flex-col gap-2">
             <button id="btnSimulate" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
-                Симулювати ціль (15км)
+                Симулювати (15км)
             </button>
             <div id="debugInfo" class="bg-black/60 text-[10px] p-2 rounded max-w-[150px] font-mono opacity-70">
                 Очікування старту...
             </div>
         </div>
 
-        <!-- МІНІ-КАРТА ТА ПОВЗУНОК МАСШТАБУ (Верхній правий кут) -->
-        <div class="absolute top-4 right-4 flex flex-col items-center gap-2 pointer-events-auto">
+        <!-- Міні-карта та Панель управління (Верхній правий кут) -->
+        <div class="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-auto">
             <div class="w-32 h-32 bg-black/60 border border-slate-700 rounded-full shadow-lg overflow-hidden backdrop-blur-md relative pointer-events-none">
                 <canvas id="radarCanvas" width="128" height="128" class="w-full h-full"></canvas>
-                <div id="radarLabel" class="absolute bottom-2 w-full text-center text-[9px] text-gray-400 font-mono tracking-widest opacity-80">50 км</div>
             </div>
-            <!-- Повзунок масштабу (від 5 до 1000 км) -->
-            <input type="range" id="radarZoom" min="5" max="1000" value="50" step="5" class="w-24 h-1 bg-gray-600 rounded-lg appearance-none outline-none">
+            
+            <div class="flex flex-col gap-3 w-32 bg-black/60 p-3 rounded-lg border border-slate-700 backdrop-blur-md">
+                <!-- Зум радара -->
+                <div>
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono mb-1">
+                        <span>🔍</span><span id="radarLabel">50 км</span>
+                    </div>
+                    <input type="range" id="radarZoom" min="5" max="1000" value="50" step="5" class="w-full h-1 bg-gray-600 rounded-lg appearance-none outline-none">
+                </div>
+                <!-- Кут огляду (FOV) -->
+                <div>
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono mb-1">
+                        <span>👁 FOV</span><span id="fovLabel">30°</span>
+                    </div>
+                    <input type="range" id="fovSlider" min="10" max="120" value="30" step="5" class="w-full h-1 bg-gray-600 rounded-lg appearance-none outline-none">
+                </div>
+            </div>
         </div>
     </div>
 
@@ -119,21 +133,24 @@
         const arrowRight = document.getElementById('arrowRight');
         const debugInfo = document.getElementById('debugInfo');
         
-        // Налаштування Canvas для міні-карти
+        // Налаштування Canvas
         const radarCanvas = document.getElementById('radarCanvas');
         const ctx = radarCanvas.getContext('2d');
         const cx = radarCanvas.width / 2;
         const cy = radarCanvas.height / 2;
         const radarRadius = cx - 10; 
         
-        // Логіка масштабу радара (до 1000 км)
+        // Повзунки
         let maxRadarKm = 50; 
-        const radarZoom = document.getElementById('radarZoom');
-        const radarLabel = document.getElementById('radarLabel');
-
-        radarZoom.addEventListener('input', (e) => {
+        let currentFov = 30; // Загальний кут огляду в градусах
+        
+        document.getElementById('radarZoom').addEventListener('input', (e) => {
             maxRadarKm = parseInt(e.target.value);
-            radarLabel.textContent = maxRadarKm + ' км';
+            document.getElementById('radarLabel').textContent = maxRadarKm + ' км';
+        });
+        document.getElementById('fovSlider').addEventListener('input', (e) => {
+            currentFov = parseInt(e.target.value);
+            document.getElementById('fovLabel').textContent = currentFov + '°';
         });
 
         window.addEventListener('deviceorientation', (e) => { if (e.webkitCompassHeading !== undefined) phoneHeading = e.webkitCompassHeading; }, true);
@@ -186,10 +203,7 @@
 
                 document.getElementById('permissionScreen').style.display = 'none';
                 requestAnimationFrame(renderLoop);
-
-            } catch (e) {
-                document.getElementById('errorMsg').textContent = e.message;
-            }
+            } catch (e) { document.getElementById('errorMsg').textContent = e.message; }
         });
 
         document.getElementById('btnSimulate').addEventListener('click', () => {
@@ -215,20 +229,25 @@
             let allThreats = [...activeThreats];
             if (fakeTarget) allThreats.push(fakeTarget);
 
-            let closestThreat = null, minDistance = Infinity, closestPredicted = null;
+            let closestInFov = null;
+            let minDistInFov = Infinity;
+            let closestOverall = null;
+            let minDistOverall = Infinity;
+            
+            const halfFov = currentFov / 2;
             
             ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
             
-            // Сітка міні-карти
+            // Сітка
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
             ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius * 0.5, 0, 2 * Math.PI); ctx.stroke();
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius, 0, 2 * Math.PI); ctx.stroke();
 
-            // Конус зору
+            // Конус зору (динамічний)
             ctx.beginPath();
             ctx.moveTo(cx, cy);
-            ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (15 * Math.PI/180), -Math.PI/2 + (15 * Math.PI/180));
+            ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (halfFov * Math.PI/180), -Math.PI/2 + (halfFov * Math.PI/180));
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.fill();
 
@@ -260,19 +279,24 @@
                 ctx.fillStyle = meta.color;
                 ctx.fill();
                 
-                if (distKm < minDistance) {
-                    minDistance = distKm; closestThreat = t; closestPredicted = p;
+                // Збереження глобально найближчої цілі (для стрілок навігації)
+                if (distKm < minDistOverall) {
+                    minDistOverall = distKm; 
+                    closestOverall = { threat: t, predicted: p, delta: deltaAngle };
+                }
+                
+                // Збереження найближчої цілі У ПОЛІ ЗОРУ (для захоплення)
+                if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) {
+                    minDistInFov = distKm;
+                    closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm };
                 }
             }
 
             debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Цілей: ${allThreats.length}`;
 
-            if (!closestThreat) { resetUI(); return; }
-
-            const targetBearing = getBearing(myLat, myLon, closestPredicted.lat, closestPredicted.lon);
-            let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
-            
-            if (Math.abs(deltaAngle) <= 15) {
+            // ЛОГІКА ЗАХОПЛЕННЯ
+            if (closestInFov) {
+                // Якщо є ціль у полі зору - захоплюємо її
                 if (!isLocked) {
                     isLocked = true;
                     uiLayer.classList.add('locked-on'); crosshair.classList.add('active');
@@ -281,26 +305,31 @@
                 }
                 playAlertBeep();
                 
-                const meta = NEPTUN.getTypeMeta(closestThreat.type) || { color: 'red', title: 'Невідомо', icon: '❓' };
+                const t = closestInFov.threat;
+                const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red', title: 'Невідомо', icon: '❓' };
+                
                 document.getElementById('hudIcon').textContent = meta.icon;
                 document.getElementById('hudIcon').style.color = meta.color;
-                document.getElementById('hudTitle').textContent = closestThreat.title || meta.title;
+                document.getElementById('hudTitle').textContent = t.title || meta.title;
                 document.getElementById('hudTitle').style.color = meta.color;
                 
-                // Визначаємо локацію (найбільш точну з доступних)
-                const locationText = closestThreat.locality || closestThreat.district || closestThreat.region || "Невідомо";
+                const locationText = t.locality || t.district || t.region || "Невідомо";
                 document.getElementById('hudLoc').textContent = locationText;
+                document.getElementById('hudCourse').textContent = t.explanationShort || "Невідомо";
                 
-                document.getElementById('hudDesc').textContent = closestThreat.explanationShort || "Деталі невідомі";
-                document.getElementById('hudDist').textContent = minDistance < 1 ? Math.round(minDistance * 1000) + ' м' : minDistance.toFixed(1) + ' км';
-                document.getElementById('hudSpeed').textContent = (closestThreat.velocity && closestThreat.velocity.speedKmh) ? closestThreat.velocity.speedKmh + ' км/год' : 'Н/Д';
-                document.getElementById('hudCount').textContent = closestThreat.count > 1 ? closestThreat.count + ' шт.' : '1 шт.';
-                document.getElementById('hudAccuracy').textContent = closestThreat.uncertaintyKm ? '±' + closestThreat.uncertaintyKm + ' км' : 'Н/Д';
+                document.getElementById('hudDist').textContent = closestInFov.dist < 1 ? Math.round(closestInFov.dist * 1000) + ' м' : closestInFov.dist.toFixed(1) + ' км';
+                document.getElementById('hudSpeed').textContent = (t.velocity && t.velocity.speedKmh) ? t.velocity.speedKmh + ' км/год' : 'Н/Д';
+                document.getElementById('hudCount').textContent = t.count > 1 ? t.count + ' шт.' : '1 шт.';
+                document.getElementById('hudAccuracy').textContent = t.uncertaintyKm ? '±' + t.uncertaintyKm + ' км' : 'Н/Д';
                 
-            } else {
+            } else if (closestOverall) {
+                // Цілей у полі зору немає, але десь є - показуємо стрілки, куди крутитися
                 resetUI();
-                if (deltaAngle < 0) arrowLeft.style.display = 'block';
+                if (closestOverall.delta < 0) arrowLeft.style.display = 'block';
                 else arrowRight.style.display = 'block';
+            } else {
+                // Цілей взагалі немає
+                resetUI();
             }
         }
 
