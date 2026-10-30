@@ -123,4 +123,188 @@
         const ctx = radarCanvas.getContext('2d');
         const cx = radarCanvas.width / 2;
         const cy = radarCanvas.height / 2;
-        const radarRadius = cx - 10
+        const radarRadius = cx - 10; // Відступ від країв
+        
+        // Логіка масштабу радара
+        let maxRadarKm = 50; 
+        const radarZoom = document.getElementById('radarZoom');
+        const radarLabel = document.getElementById('radarLabel');
+
+        radarZoom.addEventListener('input', (e) => {
+            maxRadarKm = parseInt(e.target.value);
+            radarLabel.textContent = maxRadarKm + ' км';
+        });
+
+        window.addEventListener('deviceorientation', (e) => { if (e.webkitCompassHeading !== undefined) phoneHeading = e.webkitCompassHeading; }, true);
+        window.addEventListener('deviceorientationabsolute', (e) => { if (e.alpha !== null) phoneHeading = (360 - e.alpha) % 360; }, true);
+
+        function playAlertBeep() {
+            if (!audioCtx || audioCtx.currentTime - lastBeep < 0.5) return;
+            lastBeep = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.type = 'square'; osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            osc.start(); gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function getBearing(lat1, lon1, lat2, lon2) {
+            const toRad = Math.PI / 180, toDeg = 180 / Math.PI;
+            const dLon = (lon2 - lon1) * toRad;
+            const y = Math.sin(dLon) * Math.cos(lat2 * toRad);
+            const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) - Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos(dLon);
+            return (Math.atan2(y, x) * toDeg + 360) % 360;
+        }
+
+        document.getElementById('btnStart').addEventListener('click', async () => {
+            try {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission !== 'granted') throw new Error("Компасу відмовлено");
+                }
+
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                document.getElementById('cameraFeed').srcObject = stream;
+
+                navigator.geolocation.watchPosition(
+                    (pos) => { myLat = pos.coords.latitude; myLon = pos.coords.longitude; },
+                    (err) => { alert("GPS: " + err.message); }, { enableHighAccuracy: true }
+                );
+
+                client = new NEPTUN.RealtimeClient("https://neptun.in.ua");
+                client.subscribe((snap) => {
+                    activeThreats = snap.threats.filter(t => !t.areaOnly && t.status !== 'resolved');
+                });
+                client.start();
+
+                document.getElementById('permissionScreen').style.display = 'none';
+                requestAnimationFrame(renderLoop);
+
+            } catch (e) {
+                document.getElementById('errorMsg').textContent = e.message;
+            }
+        });
+
+        document.getElementById('btnSimulate').addEventListener('click', () => {
+            if (myLat === 0) return alert("Чекаємо GPS...");
+            const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 15); 
+            const nowIso = new Date().toISOString();
+            const headingToMe = (phoneHeading + 180) % 360;
+            fakeTarget = {
+                id: 'sim_1', type: 'missile', lat: targetPos.lat, lon: targetPos.lon,
+                heading: headingToMe, velocity: { speedKmh: 800, bearingDeg: headingToMe }, 
+                title: "СИМУЛЯЦІЯ (Ракета)", explanationShort: "Навчальна ракета курсом на вас",
+                count: 1, uncertaintyKm: 2, updatedAt: nowIso, confirmedAt: nowIso, status: 'active'
+            };
+            setTimeout(() => { fakeTarget = null; }, 30000);
+        });
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+            if (myLat === 0) return;
+
+            const now = Date.now();
+            let allThreats = [...activeThreats];
+            if (fakeTarget) allThreats.push(fakeTarget);
+
+            let closestThreat = null, minDistance = Infinity, closestPredicted = null;
+            
+            ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+            
+            // Малюємо сітку міні-карти (кільця)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, radarRadius * 0.5, 0, 2 * Math.PI); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radarRadius, 0, 2 * Math.PI); ctx.stroke();
+
+            // Малюємо конус зору користувача (погляд завжди ВГОРУ екрана радара)
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (15 * Math.PI/180), -Math.PI/2 + (15 * Math.PI/180));
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fill();
+
+            // Точка користувача (Центр)
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = '#3b82f6';
+            ctx.fill();
+
+            for (const t of allThreats) {
+                const p = NEPTUN.predict(t, now);
+                if (!p || isNaN(p.lat)) continue; 
+                
+                const distKm = NEPTUN.distanceKm(myLat, myLon, p.lat, p.lon);
+                const targetBearing = getBearing(myLat, myLon, p.lat, p.lon);
+                let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
+                
+                // Динамічний масштаб радара на основі maxRadarKm
+                let scale = distKm / maxRadarKm;
+                if (scale > 1) scale = 1; 
+                
+                const rad = (deltaAngle - 90) * Math.PI / 180;
+                const px = cx + (scale * radarRadius) * Math.cos(rad);
+                const py = cy + (scale * radarRadius) * Math.sin(rad);
+                
+                const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red' };
+                
+                ctx.beginPath();
+                ctx.arc(px, py, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = meta.color;
+                ctx.fill();
+                
+                if (distKm < minDistance) {
+                    minDistance = distKm; closestThreat = t; closestPredicted = p;
+                }
+            }
+
+            debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Цілей: ${allThreats.length}`;
+
+            if (!closestThreat) { resetUI(); return; }
+
+            const targetBearing = getBearing(myLat, myLon, closestPredicted.lat, closestPredicted.lon);
+            let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
+            
+            if (Math.abs(deltaAngle) <= 15) {
+                if (!isLocked) {
+                    isLocked = true;
+                    uiLayer.classList.add('locked-on'); crosshair.classList.add('active');
+                    targetHUD.classList.remove('hidden'); targetHUD.classList.add('flex');
+                    arrowLeft.style.display = 'none'; arrowRight.style.display = 'none';
+                }
+                playAlertBeep();
+                
+                const meta = NEPTUN.getTypeMeta(closestThreat.type) || { color: 'red', title: 'Невідомо', icon: '❓' };
+                document.getElementById('hudIcon').textContent = meta.icon;
+                document.getElementById('hudIcon').style.color = meta.color;
+                document.getElementById('hudTitle').textContent = closestThreat.title || meta.title;
+                document.getElementById('hudTitle').style.color = meta.color;
+                
+                document.getElementById('hudDesc').textContent = closestThreat.explanationShort || "Деталі невідомі";
+                document.getElementById('hudDist').textContent = minDistance < 1 ? Math.round(minDistance * 1000) + ' м' : minDistance.toFixed(1) + ' км';
+                document.getElementById('hudSpeed').textContent = (closestThreat.velocity && closestThreat.velocity.speedKmh) ? closestThreat.velocity.speedKmh + ' км/год' : 'Н/Д';
+                document.getElementById('hudCount').textContent = closestThreat.count > 1 ? closestThreat.count + ' шт.' : '1 шт.';
+                document.getElementById('hudAccuracy').textContent = closestThreat.uncertaintyKm ? '±' + closestThreat.uncertaintyKm + ' км' : 'Н/Д';
+                
+            } else {
+                resetUI();
+                if (deltaAngle < 0) arrowLeft.style.display = 'block';
+                else arrowRight.style.display = 'block';
+            }
+        }
+
+        function resetUI() {
+            isLocked = false;
+            uiLayer.classList.remove('locked-on'); crosshair.classList.remove('active');
+            targetHUD.classList.add('hidden'); targetHUD.classList.remove('flex');
+            arrowLeft.style.display = 'none'; arrowRight.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
