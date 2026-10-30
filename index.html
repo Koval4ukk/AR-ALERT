@@ -81,9 +81,8 @@
     </div>
 
     <script>
-        // Глобальний перехоплювач помилок для виводу на екран телефону
         window.onerror = function(msg, url, lineNo) {
-            document.getElementById('errorMsg').innerHTML += `<br>Системна помилка: ${msg} (рядок ${lineNo})`;
+            document.getElementById('errorMsg').innerHTML += `<br>Системна помилка: ${msg}`;
             return false;
         };
         window.addEventListener('unhandledrejection', function(event) {
@@ -101,11 +100,18 @@
         const arrowRight = document.getElementById('arrowRight');
         const debugInfo = document.getElementById('debugInfo');
 
+        // Для iOS (Apple)
         window.addEventListener('deviceorientation', (e) => {
             if (e.webkitCompassHeading !== undefined) {
                 phoneHeading = e.webkitCompassHeading; 
-            } else if (e.absolute && e.alpha !== null) {
-                phoneHeading = 360 - e.alpha; 
+            }
+        }, true);
+
+        // Для Android (Chrome/Edge) - абсолютний компас
+        window.addEventListener('deviceorientationabsolute', (e) => {
+            if (e.alpha !== null) {
+                // W3C alpha рахується проти годинникової, а компас за годинниковою
+                phoneHeading = (360 - e.alpha) % 360; 
             }
         }, true);
 
@@ -127,7 +133,6 @@
             osc.stop(audioCtx.currentTime + 0.15);
         }
 
-        // Ручний розрахунок азимута на випадок відсутності функції в SDK
         function getBearing(lat1, lon1, lat2, lon2) {
             const toRad = Math.PI / 180;
             const toDeg = 180 / Math.PI;
@@ -146,7 +151,6 @@
                     if (permission !== 'granted') throw new Error("Дозвіл на компас відхилено");
                 }
 
-                // Ініціалізуємо аудіо ТІЛЬКИ після кліку
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 audioCtx = new AudioContext();
                 if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -160,7 +164,6 @@
                     { enableHighAccuracy: true }
                 );
 
-                // Ініціалізуємо клієнт ТІЛЬКИ після кліку
                 client = new NEPTUN.RealtimeClient("https://neptun.in.ua");
                 client.subscribe((snap) => {
                     activeThreats = snap.threats.filter(t => !t.areaOnly && t.status !== 'resolved');
@@ -246,13 +249,4 @@
 
         function resetUI() {
             isLocked = false;
-            uiLayer.classList.remove('locked-on');
-            crosshair.classList.remove('active');
-            targetHUD.classList.add('hidden');
-            targetHUD.classList.remove('flex');
-            arrowLeft.style.display = 'none';
-            arrowRight.style.display = 'none';
-        }
-    </script>
-</body>
-</html>
+            ui
