@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NEPTUN AR MVP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; }
+        
+        /* Video background */
+        #camera-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* AR Overlay Container */
+        #ar-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            overflow: hidden;
+            pointer-events: none; /* Let clicks pass through */
+        }
+
+        /* Start / Error UI */
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.9);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            color: white;
+            text-align: center;
+        }
+
+        /* Radar Lock UI Elements */
+        #alert-border {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 40;
+            opacity: 0;
+            transition: opacity 0.2s;
+            box-shadow: inset 0 0 40px 10px rgba(239, 68, 68, 0.8);
+        }
+        
+        .locked #alert-border {
+            opacity: 1;
+            animation: pulse-red 0.5s infinite alternate;
+        }
+
+        @keyframes pulse-red {
+            from { box-shadow: inset 0 0 20px 5px rgba(239, 68, 68, 0.6); }
+            to { box-shadow: inset 0 0 80px 20px rgba(239, 68, 68, 0.9); }
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px; height: 60px;
+            z-index: 30;
+            pointer-events: none;
+            border: 2px solid rgba(34, 197, 94, 0.5);
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        
+        .crosshair::before, .crosshair::after {
+            content: '';
+            position: absolute;
+            background: #22c55e;
+            transition: background 0.2s;
+        }
+        
+        .crosshair::before { top: 27px; left: -10px; width: 76px; height: 2px; }
+        .crosshair::after { top: -10px; left: 27px; width: 2px; height: 76px; }
+
+        .locked .crosshair {
+            border-color: rgba(239, 68, 68, 0.8);
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+        .locked .crosshair::before, .locked .crosshair::after {
+            background: #ef4444;
+        }
+
+        #hud-panel {
+            position: absolute;
+            top: calc(50% + 60px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #ef4444;
+            color: #f87171;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            text-align: center;
+            z-index: 35;
+            display: none;
+            backdrop-filter: blur(4px);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+            min-width: 240px;
+        }
+
+        .locked #hud-panel {
+            display: block;
+        }
+
+        /* Directional Arrows */
+        .dir-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 3rem;
+            color: rgba(239, 68, 68, 0.8);
+            z-index: 35;
+            display: none;
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+            animation: pulse-arrow 1s infinite alternate;
+        }
+        @keyframes pulse-arrow {
+            from { opacity: 0.3; transform: translateY(-50%) scale(0.9); }
+            to { opacity: 1; transform: translateY(-50%) scale(1.1); }
+        }
+        #arrow-left { left: 1rem; }
+        #arrow-right { right: 1rem; }
+
+        .hud-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        .hud-val { font-weight: bold; color: #fff; }
+
+        /* Compass / Debug Info */
+        #debug-panel {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            color: #10b981;
+            font-family: monospace;
+            font-size: 0.7rem;
+            pointer-events: none;
+        }
+
+        /* Attribution */
+        #attribution {
+            position: absolute;
+            bottom: 1.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            backdrop-filter: blur(4px);
+        }
+        #attribution a {
+            color: #e2e8f0;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        #attribution a:hover { color: #fff; text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <!-- Camera Feed -->
+    <video id="camera-feed" autoplay playsinline muted></video>
+
+    <!-- Alert Border -->
+    <div id="alert-border"></div>
+
+    <!-- Center Crosshair -->
+    <div class="crosshair"></div>
+
+    <!-- Target Info HUD -->
+    <div id="hud-panel">
+        <div class="text-white font-bold text-sm mb-2 uppercase border-b border-red-500/50 pb-1" id="hud-title">TARGET LOCK</div>
+        <div class="hud-row"><span>ТИП:</span> <span class="hud-val" id="hud-type">---</span></div>
+        <div class="hud-row"><span>ВІДСТАНЬ:</span> <span class="hud-val" id="hud-dist">---</span></div>
+        <div class="hud-row"><span>ШВИДКІСТЬ:</span> <span class="hud-val" id="hud-speed">---</span></div>
+        <div class="hud-row"><span>КУРС:</span> <span class="hud-val" id="hud-heading">---</span></div>
+    </div>
+
+    <!-- Directional Arrows -->
+    <div id="arrow-left" class="dir-arrow">◀</div>
+    <div id="arrow-right" class="dir-arrow">▶</div>
+
+    <!-- Debug / Status Panel -->
+    <div id="debug-panel" class="hidden md:block pointer-events-none">
+        <div id="debug-text">Очікування даних...</div>
+        <button id="sim-btn" class="mt-2 w-full bg-slate-700/80 hover:bg-slate-600 text-white text-[10px] py-1.5 px-2 rounded border border-slate-500 backdrop-blur pointer-events-auto">
+            Симулювати ціль (30м)
+        </button>
+    </div>
+
+    <!-- Attribution (Required by NEPTUN API) -->
+    <div id="attribution">
+        <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: Карта повітряних тривог — NEPTUN</a>
+    </div>
+
+    <!-- Permissions / Start UI -->
+    <div id="ui-overlay">
+        <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-2xl border border-slate-700">
+            <h1 class="text-2xl font-bold mb-4 text-white">NEPTUN AR Scanner</h1>
+            <p class="text-slate-300 text-sm mb-6 text-left">
+                Цей експериментальний сервіс використовує вашу камеру, геолокацію та компас для відображення повітряних загроз у доповненій реальності.
+            </p>
+            
+            <div class="space-y-3 mb-6 text-sm text-left text-slate-400">
+                <div class="flex items-center"><span class="mr-2">📍</span> Дозвіл на GPS локацію</div>
+                <div class="flex items-center"><span class="mr-2">📷</span> Дозвіл на використання камери</div>
+                <div class="flex items-center"><span class="mr-2">🧭</span> Дозвіл на датчики орієнтації (компас)</div>
+            </div>
+
+            <button id="start-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-xl transition duration-200">
+                Надати дозволи та Почати
+            </button>
+            <p id="error-msg" class="text-red-400 text-xs mt-4 hidden"></p>
+        </div>
+    </div>
+
+    <!-- Main Logic -->
+    <script type="module">
+        import { RealtimeClient, predict, getTypeMeta } from "https://neptun.in.ua/sdk/neptun.esm.js";
+
+        // --- State ---
+        let userLocation = { lat: null, lon: null };
+        let deviceHeading = 0; // Compass heading (0-360)
+        let activeThreats = [];
+        let simulatedThreats = [];
+        let audioCtx = null;
+        let lastBeepTime = 0;
+        const debugPanel = document.getElementById('debug-panel');
+        const debugText = document.getElementById('debug-text');
+        const LOCK_ANGLE = 15; // Degrees difference for lock-on
+
+        // --- DOM Elements ---
+        const startBtn = document.getElementById('start-btn');
+        const uiOverlay = document.getElementById('ui-overlay');
+        const errorMsg = document.getElementById('error-msg');
+        const videoElement = document.getElementById('camera-feed');
+
+        // --- Initialization on Button Click ---
+        startBtn.addEventListener('click', async () => {
+            try {
+                errorMsg.classList.add('hidden');
+                startBtn.innerText = "Ініціалізація...";
+                startBtn.disabled = true;
+
+                // Init AudioContext on user interaction
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+
+                await initCamera();
+                await initOrientation();
+                await initLocation();
+
+                // All permissions granted, hide UI
+                uiOverlay.style.display = 'none';
+                
+                // Start NEPTUN and Render Loop
+                initNeptun();
+                requestAnimationFrame(renderARLoop);
+                
+            } catch (err) {
+                console.error(err);
+                startBtn.innerText = "Спробувати ще раз";
+                startBtn.disabled = false;
+                errorMsg.innerText = "Помилка: " + err.message;
+                errorMsg.classList.remove('hidden');
+            }
+        });
+
+        // --- 1. Camera Init ---
+        async function initCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error("Камера не підтримується браузером.");
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment" },
+                audio: false
+            });
+            videoElement.srcObject = stream;
+        }
+
+        // --- 2. Orientation (Compass) Init ---
+        async function initOrientation() {
+            // Request permission for iOS 13+ devices
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                const permissionState = await DeviceOrientationEvent.requestPermission();
+                if (permissionState !== 'granted') {
+                    throw new Error("Немає доступу до компасу.");
+                }
+            }
+            
+            // Absolute orientation works best on Android
+            if ('ondeviceorientationabsolute' in window) {
+                window.addEventListener('deviceorientationabsolute', handleOrientation);
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        }
+
+        function handleOrientation(event) {
+            // iOS provides webkitCompassHeading directly
+            if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+                deviceHeading = event.webkitCompassHeading;
+            } 
+            // Android uses alpha (needs to be absolute)
+            else if (event.alpha !== null) {
+                // Alpha is rotation around Z axis. 0 is north, 90 is west. We need to convert it to standard compass (0 North, 90 East).
+                // Note: The precise calculation depends on absolute flag, but for MVP this approximation works on many Androids.
+                deviceHeading = 360 - event.alpha;
+                if (deviceHeading === 360) deviceHeading = 0;
+            }
+        }
+
+        // --- 3. Location (GPS) Init ---
+        function initLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject(new Error("Геолокація не підтримується."));
+                    return;
+                }
+
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        userLocation.lat = position.coords.latitude;
+                        userLocation.lon = position.coords.longitude;
+                        resolve(); // Resolve on first successful read
+                    },
+                    (error) => {
+                        reject(new Error("Не вдалося отримати GPS координати."));
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0 }
+                );
+            });
+        }
+
+        // --- 4. NEPTUN SDK Init ---
+        function initNeptun() {
+            const client = new RealtimeClient("https://neptun.in.ua");
+            
+            client.subscribe((snap) => {
+                // Filter out areaOnly threats as they don't have exact coordinates for AR rendering
+                activeThreats = snap.threats.filter(t => !t.areaOnly);
+            });
+
+            client.start();
+        }
+
+        // --- 5. Math Helpers (Haversine & Azimuth) ---
+        function deg2rad(deg) { return deg * (Math.PI/180); }
+        function rad2deg(rad) { return rad * (180/Math.PI); }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = deg2rad(lat2 - lat1);
+            const dLon = deg2rad(lon2 - lon1);
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const phi1 = deg2rad(lat1);
+            const phi2 = deg2rad(lat2);
+            const lam1 = deg2rad(lon1);
+            const lam2 = deg2rad(lon2);
+
+            const y = Math.sin(lam2 - lam1) * Math.cos(phi2);
+            const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lam2 - lam1);
+            
+            let brng = Math.atan2(y, x);
+            brng = rad2deg(brng);
+            return (brng + 360) % 360;
+        }
+
+        // Calculates the relative angle between where phone is pointing and where the target is
+        function getRelativeAngle(heading, targetBearing) {
+            let diff = (targetBearing - heading + 360) % 360;
+            if (diff > 180) diff -= 360;
+            return diff;
+        }
+
+        // --- Calculate Destination (for Simulation) ---
+        function getDestinationPoint(lat, lon, distanceKm, bearingDeg) {
+            const R = 6371;
+            const d = distanceKm;
+            const brng = deg2rad(bearingDeg);
+            const lat1 = deg2rad(lat);
+            const lon1 = deg2rad(lon);
+
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) +
+                Math.cos(lat1) * Math.sin(d / R) * Math.cos(brng));
+            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d / R) * Math.cos(lat1),
+                Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
+
+            return { lat: rad2deg(lat2), lon: rad2deg(lon2) };
+        }
+
+        // --- Audio Beep Function ---
+        function playLockBeep() {
+            if (!audioCtx) return;
+            const now = Date.now();
+            if (now - lastBeepTime < 300) return; // beep every 300ms
+            lastBeepTime = now;
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch military beep
+            
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        // --- Simulation Button Logic ---
+        document.getElementById('sim-btn').addEventListener('click', () => {
+            if (!userLocation.lat) return;
+            // Place 15 km away exactly in front of the camera
+            const tgt = getDestinationPoint(userLocation.lat, userLocation.lon, 15, deviceHeading);
+            
+            // Calculate a bearing towards the user (opposite of device heading)
+            const flightBearing = (deviceHeading + 180) % 360;
+
+            simulatedThreats.push({
+                id: 'sim_' + Date.now(),
+                type: 'missile',
+                title: 'СИМУЛЯЦІЯ',
+                lat: tgt.lat,
+                lon: tgt.lon,
+                heading: flightBearing,
+                velocity: { bearingDeg: flightBearing, speedKmh: 600 },
+                updatedAt: new Date().toISOString(),
+                confirmedAt: new Date().toISOString(),
+                locality: 'Прямо за курсом',
+                isSim: true
+            });
+            
+            // Remove simulation after 30 seconds
+            setTimeout(() => { simulatedThreats.shift(); }, 30000);
+        });
+
+        // --- 6. AR Render Loop ---
+        function renderARLoop() {
+            if (!userLocation.lat || !userLocation.lon) {
+                requestAnimationFrame(renderARLoop);
+                return;
+            }
+
+            const now = Date.now();
+            const allThreats = [...activeThreats, ...simulatedThreats];
+            
+            let debugStr = `Азимут: ${Math.round(deviceHeading)}°\nЦілей: ${allThreats.length}`;
+            if(debugText) debugText.innerText = debugStr;
+
+            const arrowLeft = document.getElementById('arrow-left');
+            const arrowRight = document.getElementById('arrow-right');
+
+            if (allThreats.length === 0) {
+                document.body.classList.remove('locked');
+                arrowLeft.style.display = 'none';
+                arrowRight.style.display = 'none';
+                requestAnimationFrame(renderARLoop);
+                return;
+            }
+
+            // Find the closest target to track
+            let trackedTarget = null;
+            let minDistance = Infinity;
+
+            allThreats.forEach(threat => {
+                const p = predict(threat, now);
+                const distanceKm = calculateDistance(userLocation.lat, userLocation.lon, p.lat, p.lon);
+                
+                if (distanceKm < minDistance) {
+                    minDistance = distanceKm;
+                    trackedTarget = { threat, p, distanceKm };
+                }
+            });
+
+            if (trackedTarget) {
+                const bearingToTarget = calculateBearing(userLocation.lat, userLocation.lon, trackedTarget.p.lat, trackedTarget.p.lon);
+                const diff = getRelativeAngle(deviceHeading, bearingToTarget);
+
+                if (diff < -LOCK_ANGLE) {
+                    // Target is to the left
+                    document.body.classList.remove('locked');
+                    arrowLeft.style.display = 'block';
+                    arrowRight.style.display = 'none';
+                } else if (diff > LOCK_ANGLE) {
+                    // Target is to the right
+                    document.body.classList.remove('locked');
+                    arrowLeft.style.display = 'none';
+                    arrowRight.style.display = 'block';
+                } else {
+                    // Lock-on! Target is within 15 degrees
+                    document.body.classList.add('locked');
+                    arrowLeft.style.display = 'none';
+                    arrowRight.style.display = 'none';
+                    
+                    // Update HUD
+                    const t = trackedTarget.threat;
+                    const meta = getTypeMeta(t.type);
+                    const distText = trackedTarget.distanceKm < 1 ? 
+                        (trackedTarget.distanceKm * 1000).toFixed(0) + ' м' : 
+                        trackedTarget.distanceKm.toFixed(2) + ' км';
+                    
+                    let speedText = '---';
+                    if (t.velocity && t.velocity.speedKmh) {
+                        speedText = Math.round(t.velocity.speedKmh) + ' км/год';
+                    }
+
+                    let headingText = '---';
+                    if (t.heading !== null && t.heading !== undefined) {
+                        headingText = Math.round(t.heading) + '°';
+                    }
+
+                    document.getElementById('hud-title').innerText = t.title || meta.name;
+                    document.getElementById('hud-type').innerText = meta.name;
+                    document.getElementById('hud-dist').innerText = distText;
+                    document.getElementById('hud-speed').innerText = speedText;
+                    document.getElementById('hud-heading').innerText = headingText;
+
+                    playLockBeep();
+                }
+            }
+
+            requestAnimationFrame(renderARLoop);
+        }
+    </script>
+</body>
+</html>
