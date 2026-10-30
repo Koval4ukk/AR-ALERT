@@ -11,32 +11,24 @@
         #cameraFeed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
         #uiLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
         
-        /* Червоне блимання при захопленні */
         @keyframes alertFlash {
             0% { box-shadow: inset 0 0 0px rgba(255,0,0,0); }
             50% { box-shadow: inset 0 0 50px rgba(255,0,0,0.8); border: 2px solid red; }
             100% { box-shadow: inset 0 0 0px rgba(255,0,0,0); }
         }
-        .locked-on {
-            animation: alertFlash 0.5s infinite;
-        }
+        .locked-on { animation: alertFlash 0.5s infinite; }
 
-        /* Приціл у центрі */
         .crosshair {
             position: absolute; top: 50%; left: 50%; width: 60px; height: 60px;
             transform: translate(-50%, -50%); border: 2px solid rgba(255,255,255,0.5);
             border-radius: 50%; transition: border-color 0.2s;
         }
-        .crosshair::before, .crosshair::after {
-            content: ''; position: absolute; background: rgba(255,255,255,0.5);
-        }
+        .crosshair::before, .crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,0.5); }
         .crosshair::before { top: 50%; left: -10px; width: 80px; height: 2px; margin-top: -1px; }
         .crosshair::after { left: 50%; top: -10px; width: 2px; height: 80px; margin-left: -1px; }
-        
         .crosshair.active { border-color: red; }
         .crosshair.active::before, .crosshair.active::after { background: red; }
 
-        /* Навігаційні стрілки */
         .nav-arrow {
             position: absolute; top: 50%; transform: translateY(-50%);
             font-size: 4rem; color: red; font-weight: bold; text-shadow: 0 0 10px rgba(0,0,0,0.8);
@@ -44,26 +36,18 @@
         }
         .nav-arrow.left { left: 20px; }
         .nav-arrow.right { right: 20px; }
-
         @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
     </style>
 </head>
 <body class="text-white relative">
 
-    <!-- Відео з камери -->
     <video id="cameraFeed" autoplay playsinline></video>
 
-    <!-- AR Інтерфейс -->
     <div id="uiLayer" class="relative w-full h-full border-box">
-        
-        <!-- Приціл -->
         <div id="crosshair" class="crosshair"></div>
-
-        <!-- Навігаційні стрілки -->
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
-        <!-- Інформаційна панель цілі (HUD) -->
         <div id="targetHUD" class="absolute top-[60%] left-1/2 -translate-x-1/2 bg-black/80 border border-red-500 rounded-lg p-3 w-64 hidden flex-col items-center shadow-[0_0_15px_rgba(255,0,0,0.5)]">
             <div id="hudIcon" class="text-3xl mb-1">🎯</div>
             <div id="hudTitle" class="text-red-500 font-bold text-lg uppercase tracking-wider">Ціль</div>
@@ -77,44 +61,38 @@
             </div>
         </div>
 
-        <!-- Панель управління (Debug) -->
         <div class="absolute top-4 left-4 pointer-events-auto flex flex-col gap-2">
             <button id="btnSimulate" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
                 Симулювати ціль (15км)
             </button>
             <div id="debugInfo" class="bg-black/60 text-[10px] p-2 rounded max-w-[150px] font-mono opacity-70">
-                Пошук сигналу...
+                Очікування старту...
             </div>
-        </div>
-
-        <!-- Атрибуція NEPTUN -->
-        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-full text-xs text-center pointer-events-auto">
-            <a href="https://neptun.in.ua/" target="_blank" class="text-gray-300 underline">Дані: Карта повітряних тривог — NEPTUN</a>
         </div>
     </div>
 
-    <!-- Стартовий екран запиту дозволів -->
     <div id="permissionScreen" class="absolute inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6 text-center">
         <h1 class="text-2xl font-bold mb-4">NEPTUN AR Radar</h1>
-        <p class="text-sm text-slate-300 mb-6 max-w-sm">
-            Для роботи системи наведення необхідний доступ до компаса, камери та GPS.
-        </p>
+        <p class="text-sm text-slate-300 mb-6 max-w-sm">Для роботи системи необхідний доступ до компаса, камери та GPS.</p>
         <button id="btnStart" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg w-full max-w-sm">
             Надати дозволи та Почати
         </button>
-        <p id="errorMsg" class="text-red-400 mt-4 text-xs font-mono"></p>
+        <p id="errorMsg" class="text-red-400 mt-4 text-xs font-mono break-words"></p>
     </div>
 
     <script>
+        // Глобальний перехоплювач помилок для виводу на екран телефону
+        window.onerror = function(msg, url, lineNo) {
+            document.getElementById('errorMsg').innerHTML += `<br>Системна помилка: ${msg} (рядок ${lineNo})`;
+            return false;
+        };
+        window.addEventListener('unhandledrejection', function(event) {
+            document.getElementById('errorMsg').innerHTML += `<br>Помилка дозволів: ${event.reason}`;
+        });
+
         let myLat = 0, myLon = 0, phoneHeading = 0;
-        let activeThreats = [];
-        let fakeTarget = null;
-        let isLocked = false;
-        
-        // Аудіо контекст для сигналу "Захоплення"
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioContext();
-        let lastBeep = 0;
+        let activeThreats = [], fakeTarget = null, isLocked = false;
+        let audioCtx = null, lastBeep = 0, client = null;
 
         const uiLayer = document.getElementById('uiLayer');
         const crosshair = document.getElementById('crosshair');
@@ -123,25 +101,16 @@
         const arrowRight = document.getElementById('arrowRight');
         const debugInfo = document.getElementById('debugInfo');
 
-        // Ініціалізація NEPTUN SDK
-        const client = new NEPTUN.RealtimeClient("https://neptun.in.ua");
-        client.subscribe((snap) => {
-            // Зберігаємо лише реальні цілі (ігноруємо areaOnly)
-            activeThreats = snap.threats.filter(t => !t.areaOnly && t.status !== 'resolved');
-        });
-
-        // Слухач компаса
         window.addEventListener('deviceorientation', (e) => {
             if (e.webkitCompassHeading !== undefined) {
-                phoneHeading = e.webkitCompassHeading; // iOS
+                phoneHeading = e.webkitCompassHeading; 
             } else if (e.absolute && e.alpha !== null) {
-                phoneHeading = 360 - e.alpha; // Android
+                phoneHeading = 360 - e.alpha; 
             }
         }, true);
 
-        // Генерація звуку
         function playAlertBeep() {
-            if (audioCtx.currentTime - lastBeep < 0.5) return; // Біп кожні 0.5 сек
+            if (!audioCtx || audioCtx.currentTime - lastBeep < 0.5) return; 
             lastBeep = audioCtx.currentTime;
             
             const osc = audioCtx.createOscillator();
@@ -150,73 +119,73 @@
             gain.connect(audioCtx.destination);
             
             osc.type = 'square';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Тон
-            gain.gain.setValueAtTime(0.05, audioCtx.currentTime); // Гучність
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime); 
             
             osc.start();
             gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
             osc.stop(audioCtx.currentTime + 0.15);
         }
 
-        // Кнопка старту (ВИПРАВЛЕННЯ ДЛЯ iOS)
+        // Ручний розрахунок азимута на випадок відсутності функції в SDK
+        function getBearing(lat1, lon1, lat2, lon2) {
+            const toRad = Math.PI / 180;
+            const toDeg = 180 / Math.PI;
+            const dLon = (lon2 - lon1) * toRad;
+            const y = Math.sin(dLon) * Math.cos(lat2 * toRad);
+            const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) - Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos(dLon);
+            return (Math.atan2(y, x) * toDeg + 360) % 360;
+        }
+
         document.getElementById('btnStart').addEventListener('click', async () => {
             const errorDiv = document.getElementById('errorMsg');
-            errorDiv.textContent = '';
+            errorDiv.textContent = 'Ініціалізація...';
             try {
-                // 1. КОМПАС: На iOS має запитуватися першим безпосередньо після кліку!
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission !== 'granted') throw new Error("Потрібен дозвіл на компас");
+                    if (permission !== 'granted') throw new Error("Дозвіл на компас відхилено");
                 }
 
-                // Розблокування аудіо
+                // Ініціалізуємо аудіо ТІЛЬКИ після кліку
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
                 if (audioCtx.state === 'suspended') audioCtx.resume();
 
-                // 2. КАМЕРА
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 document.getElementById('cameraFeed').srcObject = stream;
 
-                // 3. ГЕОЛОКАЦІЯ
                 navigator.geolocation.watchPosition(
                     (pos) => { myLat = pos.coords.latitude; myLon = pos.coords.longitude; },
-                    (err) => { console.error("GPS Помилка", err); },
+                    (err) => { errorDiv.textContent = "GPS Помилка: " + err.message; },
                     { enableHighAccuracy: true }
                 );
 
-                document.getElementById('permissionScreen').style.display = 'none';
-                
-                // Запуск стріму
+                // Ініціалізуємо клієнт ТІЛЬКИ після кліку
+                client = new NEPTUN.RealtimeClient("https://neptun.in.ua");
+                client.subscribe((snap) => {
+                    activeThreats = snap.threats.filter(t => !t.areaOnly && t.status !== 'resolved');
+                });
                 client.start();
+
+                document.getElementById('permissionScreen').style.display = 'none';
                 requestAnimationFrame(renderLoop);
 
             } catch (e) {
-                errorDiv.textContent = "Помилка: " + e.message;
+                errorDiv.innerHTML = "Помилка запуску: " + e.message;
             }
         });
 
-        // Симуляція цілі
         document.getElementById('btnSimulate').addEventListener('click', () => {
             if (myLat === 0) return alert("Чекаємо на координати GPS...");
-            
-            // Створюємо ціль на 15 км попереду поточного погляду
             const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 15); 
-            
             fakeTarget = {
-                id: 'sim_1',
-                type: 'missile',
-                lat: targetPos.lat,
-                lon: targetPos.lon,
-                heading: (phoneHeading + 180) % 360, // Летить на нас
-                velocity: { speedKmh: 600 },
-                title: "СИМУЛЯЦІЯ (Ракета)",
-                updatedAt: new Date().toISOString(),
-                status: 'active'
+                id: 'sim_1', type: 'missile', lat: targetPos.lat, lon: targetPos.lon,
+                heading: (phoneHeading + 180) % 360, velocity: { speedKmh: 600 },
+                title: "СИМУЛЯЦІЯ", updatedAt: new Date().toISOString(), status: 'active'
             };
-
-            setTimeout(() => { fakeTarget = null; }, 30000); // Зникне через 30 сек
+            setTimeout(() => { fakeTarget = null; }, 30000);
         });
 
-        // Основний цикл рендерингу
         function renderLoop() {
             requestAnimationFrame(renderLoop);
             if (myLat === 0) return;
@@ -229,7 +198,6 @@
             let minDistance = Infinity;
             let closestPredicted = null;
 
-            // Шукаємо найближчу ціль
             for (const t of allThreats) {
                 const p = NEPTUN.predict(t, now);
                 const distKm = NEPTUN.distanceKm(myLat, myLon, p.lat, p.lon);
@@ -240,9 +208,51 @@
                 }
             }
 
-            // Оновлюємо Дебаг
             debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Цілей: ${allThreats.length}`;
 
             if (!closestThreat) {
                 resetUI();
                 return;
+            }
+
+            const targetBearing = getBearing(myLat, myLon, closestPredicted.lat, closestPredicted.lon);
+            let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
+            
+            if (Math.abs(deltaAngle) <= 15) {
+                if (!isLocked) {
+                    isLocked = true;
+                    uiLayer.classList.add('locked-on');
+                    crosshair.classList.add('active');
+                    targetHUD.classList.remove('hidden');
+                    targetHUD.classList.add('flex');
+                    arrowLeft.style.display = 'none';
+                    arrowRight.style.display = 'none';
+                }
+                playAlertBeep();
+
+                const meta = NEPTUN.getTypeMeta(closestThreat.type) || { color: 'red', title: 'Невідомо', icon: '❓' };
+                document.getElementById('hudIcon').textContent = meta.icon;
+                document.getElementById('hudIcon').style.color = meta.color;
+                document.getElementById('hudTitle').textContent = closestThreat.title || meta.title;
+                document.getElementById('hudTitle').style.color = meta.color;
+                document.getElementById('hudDist').textContent = minDistance < 1 ? Math.round(minDistance * 1000) + ' м' : minDistance.toFixed(1) + ' км';
+                document.getElementById('hudSpeed').textContent = closestThreat.velocity ? closestThreat.velocity.speedKmh + ' км/год' : '--';
+            } else {
+                resetUI();
+                if (deltaAngle < 0) arrowLeft.style.display = 'block';
+                else arrowRight.style.display = 'block';
+            }
+        }
+
+        function resetUI() {
+            isLocked = false;
+            uiLayer.classList.remove('locked-on');
+            crosshair.classList.remove('active');
+            targetHUD.classList.add('hidden');
+            targetHUD.classList.remove('flex');
+            arrowLeft.style.display = 'none';
+            arrowRight.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
