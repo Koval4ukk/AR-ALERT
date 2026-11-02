@@ -56,6 +56,32 @@
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
+        <!-- Лівий верхній кут: Укриття + Телеметрія -->
+        <div class="absolute top-4 left-4 flex flex-col gap-2 pointer-events-auto w-48 z-20">
+            
+            <!-- HUD Найближчого укриття -->
+            <div id="shelterHUD" class="bg-black/70 border border-emerald-500/50 rounded-lg p-3 w-full backdrop-blur-md hidden shadow-[0_0_10px_rgba(16,185,129,0.3)]">
+                <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-1">
+                    <span class="text-emerald-400 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1">
+                        🛡 Найближче
+                    </span>
+                    <span id="shelterDir" class="text-emerald-400 text-lg font-bold">↑</span>
+                </div>
+                <div id="shelterAddress" class="text-white text-xs font-bold truncate mb-2">Шукаю...</div>
+                <div class="grid grid-cols-[50px_1fr] gap-x-2 gap-y-1 w-full text-[10px]">
+                    <div class="text-gray-400">Відстань:</div> <div id="shelterDist" class="font-mono font-bold text-right text-white">--</div>
+                    <div class="text-gray-400">Тип:</div> <div id="shelterType" class="text-right text-white truncate">--</div>
+                    <div class="text-gray-400">Wi-Fi:</div> <div id="shelterWifi" class="font-bold text-right text-emerald-400">--</div>
+                </div>
+            </div>
+
+            <!-- Загальна телеметрія (Азимут та цілі) -->
+            <div id="debugInfo" class="bg-black/60 border border-slate-700 p-2 rounded-lg font-mono text-[11px] opacity-90 text-left backdrop-blur-md shadow-lg w-full">
+                Очікування старту...
+            </div>
+            
+        </div>
+
         <!-- HUD Загроз (Центр-Низ) -->
         <div id="targetHUD" class="absolute top-[55%] left-1/2 -translate-x-1/2 bg-black/85 border border-red-500 rounded-lg p-4 w-[90%] max-w-sm hidden flex-col items-center shadow-[0_0_20px_rgba(255,0,0,0.7)]">
             <div id="hudIcon" class="text-4xl mb-1">🎯</div>
@@ -70,29 +96,6 @@
                 <div class="text-gray-400">Кількість:</div> <div id="hudCount" class="font-mono font-bold text-right text-white">--</div>
                 <div class="text-gray-400">Підтверджень:</div> <div id="hudSources" class="font-mono font-bold text-right text-white">--</div>
                 <div class="text-gray-400">Похибка:</div> <div id="hudAccuracy" class="font-mono font-bold text-right text-white">--</div>
-            </div>
-        </div>
-
-        <!-- HUD Найближчого укриття (Лівий верхній кут) -->
-        <div id="shelterHUD" class="absolute top-4 left-4 bg-black/70 border border-emerald-500/50 rounded-lg p-3 w-48 backdrop-blur-md hidden pointer-events-auto shadow-[0_0_10px_rgba(16,185,129,0.3)]">
-            <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-1">
-                <span class="text-emerald-400 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1">
-                    🛡 Найближче
-                </span>
-                <span id="shelterDir" class="text-emerald-400 text-lg font-bold">↑</span>
-            </div>
-            <div id="shelterAddress" class="text-white text-xs font-bold truncate mb-2">Шукаю...</div>
-            <div class="grid grid-cols-[50px_1fr] gap-x-2 gap-y-1 w-full text-[10px]">
-                <div class="text-gray-400">Відстань:</div> <div id="shelterDist" class="font-mono font-bold text-right text-white">--</div>
-                <div class="text-gray-400">Тип:</div> <div id="shelterType" class="text-right text-white truncate">--</div>
-                <div class="text-gray-400">Wi-Fi:</div> <div id="shelterWifi" class="font-bold text-right text-emerald-400">--</div>
-            </div>
-        </div>
-
-        <!-- Загальна телеметрія (Центр верх) -->
-        <div class="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">
-            <div id="debugInfo" class="bg-black/60 border border-slate-700 p-2 rounded-lg font-mono text-[11px] opacity-90 text-center backdrop-blur-md shadow-lg min-w-[120px]">
-                Очікування старту...
             </div>
         </div>
 
@@ -142,7 +145,8 @@
         let activeThreats = [], isLocked = false;
         let audioCtx = null, lastBeep = 0, client = null;
         
-        // База укриттів
+        // Зберігаємо завантажені укриття
+        let allSheltersGeo = [];
         let shelters = [];
 
         const uiLayer = document.getElementById('uiLayer');
@@ -214,8 +218,52 @@
             return directions[index];
         }
 
+        async function fetchShelters() {
+            try {
+                const res = await fetch("https://testdata.carpathia.gov.ua/dataset/f9a3dd3a-0204-490d-b6e0-013ddecfcc4c/resource/07b0c2e9-6456-4096-ba67-09e230f68fe1/download/transcarpathianbombshelters.geojson");
+                const data = await res.json();
+                allSheltersGeo = data.features || [];
+            } catch(e) {
+                console.error("Помилка завантаження бази укриттів:", e);
+            }
+        }
+
+        function updateNearestShelter(lat, lon) {
+            if (allSheltersGeo.length === 0) return;
+            
+            let minDist = Infinity;
+            let nearest = null;
+            
+            for (const f of allSheltersGeo) {
+                // GeoJSON координати: [довгота, широта]
+                const sLon = f.geometry.coordinates[0];
+                const sLat = f.geometry.coordinates[1];
+                const d = NEPTUN.distanceKm(lat, lon, sLat, sLon);
+                
+                if (d < minDist) {
+                    minDist = d;
+                    nearest = {
+                        lat: sLat, 
+                        lon: sLon,
+                        // Адаптивний пошук полів, оскільки різні GeoJSON можуть мати різні ключі
+                        address: f.properties["Місцезнаходження"] || f.properties["Адреса"] || f.properties.address || "Укриття",
+                        type: f.properties["Вид захисної споруди"] || f.properties["Тип"] || f.properties.type || "Захисна споруда",
+                        wifi: false // За замовчуванням немає даних про Wi-Fi у відкритих базах
+                    };
+                }
+            }
+            
+            if (nearest) {
+                shelters = [nearest];
+                shelterHUD.classList.remove('hidden');
+            }
+        }
+
         document.getElementById('btnStart').addEventListener('click', async () => {
             try {
+                // Паралельно вантажимо укриття
+                fetchShelters();
+
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                     const permission = await DeviceOrientationEvent.requestPermission();
                     if (permission !== 'granted') throw new Error("Компасу відмовлено");
@@ -230,17 +278,9 @@
 
                 navigator.geolocation.watchPosition(
                     (pos) => { 
-                        const firstFix = (myLat === 0);
-                        myLat = pos.coords.latitude; myLon = pos.coords.longitude; 
-                        
-                        if (firstFix) {
-                            const p = NEPTUN.dest(myLat, myLon, 45, 0.25); 
-                            shelters = [{
-                                lat: p.lat, lon: p.lon,
-                                address: "Вул. Центральна, 15", type: "Підвал школи", wifi: true
-                            }];
-                            shelterHUD.classList.remove('hidden');
-                        }
+                        myLat = pos.coords.latitude; 
+                        myLon = pos.coords.longitude; 
+                        updateNearestShelter(myLat, myLon);
                     },
                     (err) => { alert("GPS: " + err.message); }, { enableHighAccuracy: true }
                 );
@@ -338,6 +378,7 @@
                 ctx.fill();
             }
 
+            // Оновлюємо загальну телеметрію під укриттям
             debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Всіх цілей: ${allThreats.length}`;
 
             if (closestInFov) {
