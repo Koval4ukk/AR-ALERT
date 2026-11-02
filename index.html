@@ -58,8 +58,6 @@
 
         <!-- Лівий верхній кут: Укриття + Телеметрія -->
         <div class="absolute top-4 left-4 flex flex-col gap-2 pointer-events-auto w-48 z-20">
-            
-            <!-- HUD Найближчого укриття -->
             <div id="shelterHUD" class="bg-black/70 border border-emerald-500/50 rounded-lg p-3 w-full backdrop-blur-md hidden shadow-[0_0_10px_rgba(16,185,129,0.3)]">
                 <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-1">
                     <span class="text-emerald-400 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1">
@@ -75,11 +73,9 @@
                 </div>
             </div>
 
-            <!-- Загальна телеметрія (Азимут та цілі) -->
             <div id="debugInfo" class="bg-black/60 border border-slate-700 p-2 rounded-lg font-mono text-[11px] opacity-90 text-left backdrop-blur-md shadow-lg w-full">
                 Очікування старту...
             </div>
-            
         </div>
 
         <!-- HUD Загроз (Центр-Низ) -->
@@ -142,12 +138,9 @@
         window.onerror = function(msg) { alert(`ПОМИЛКА: ${msg}`); return false; };
         
         let myLat = 0, myLon = 0, phoneHeading = 0;
-        let activeThreats = [], isLocked = false;
+        let activeThreats = [], fakeTarget = null, isLocked = false;
         let audioCtx = null, lastBeep = 0, client = null;
-        
-        // Зберігаємо завантажені укриття
-        let allSheltersGeo = [];
-        let shelters = [];
+        let allSheltersGeo = [], shelters = [];
 
         const uiLayer = document.getElementById('uiLayer');
         const crosshair = document.getElementById('crosshair');
@@ -163,9 +156,7 @@
         const cy = radarCanvas.height / 2;
         const radarRadius = cx - 10; 
         
-        let maxRadarKm = 50; 
-        let currentFov = 30; 
-        let detectionRadiusKm = 30; 
+        let maxRadarKm = 50, currentFov = 30, detectionRadiusKm = 30; 
         
         const radarZoom = document.getElementById('radarZoom');
         const detSlider = document.getElementById('detSlider');
@@ -223,36 +214,25 @@
                 const res = await fetch("https://testdata.carpathia.gov.ua/dataset/f9a3dd3a-0204-490d-b6e0-013ddecfcc4c/resource/07b0c2e9-6456-4096-ba67-09e230f68fe1/download/transcarpathianbombshelters.geojson");
                 const data = await res.json();
                 allSheltersGeo = data.features || [];
-            } catch(e) {
-                console.error("Помилка завантаження бази укриттів:", e);
-            }
+            } catch(e) { console.error("Помилка завантаження бази укриттів:", e); }
         }
 
         function updateNearestShelter(lat, lon) {
             if (allSheltersGeo.length === 0) return;
-            
-            let minDist = Infinity;
-            let nearest = null;
-            
+            let minDist = Infinity, nearest = null;
             for (const f of allSheltersGeo) {
-                // GeoJSON координати: [довгота, широта]
-                const sLon = f.geometry.coordinates[0];
-                const sLat = f.geometry.coordinates[1];
+                const sLon = f.geometry.coordinates[0], sLat = f.geometry.coordinates[1];
                 const d = NEPTUN.distanceKm(lat, lon, sLat, sLon);
-                
                 if (d < minDist) {
                     minDist = d;
                     nearest = {
-                        lat: sLat, 
-                        lon: sLon,
-                        // Адаптивний пошук полів, оскільки різні GeoJSON можуть мати різні ключі
+                        lat: sLat, lon: sLon,
                         address: f.properties["Місцезнаходження"] || f.properties["Адреса"] || f.properties.address || "Укриття",
                         type: f.properties["Вид захисної споруди"] || f.properties["Тип"] || f.properties.type || "Захисна споруда",
-                        wifi: false // За замовчуванням немає даних про Wi-Fi у відкритих базах
+                        wifi: false
                     };
                 }
             }
-            
             if (nearest) {
                 shelters = [nearest];
                 shelterHUD.classList.remove('hidden');
@@ -261,7 +241,6 @@
 
         document.getElementById('btnStart').addEventListener('click', async () => {
             try {
-                // Паралельно вантажимо укриття
                 fetchShelters();
 
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -278,8 +257,7 @@
 
                 navigator.geolocation.watchPosition(
                     (pos) => { 
-                        myLat = pos.coords.latitude; 
-                        myLon = pos.coords.longitude; 
+                        myLat = pos.coords.latitude; myLon = pos.coords.longitude; 
                         updateNearestShelter(myLat, myLon);
                     },
                     (err) => { alert("GPS: " + err.message); }, { enableHighAccuracy: true }
@@ -292,6 +270,23 @@
                 client.start();
 
                 document.getElementById('permissionScreen').style.display = 'none';
+                
+                // Додаємо тестову симуляцію для зручності (зникне через 30 сек)
+                setTimeout(() => {
+                    if (myLat !== 0) {
+                        const targetPos = NEPTUN.dest(myLat, myLon, phoneHeading, 15); 
+                        const headingToMe = (phoneHeading + 180) % 360;
+                        fakeTarget = {
+                            id: 'sim_1', type: 'missile', lat: targetPos.lat, lon: targetPos.lon,
+                            heading: headingToMe, velocity: { speedKmh: 800, bearingDeg: headingToMe }, 
+                            title: "СИМУЛЯЦІЯ (Ракета)", explanationShort: "Навчальна ракета",
+                            locality: "Ваш сектор", count: 1, sourceCount: 5, uncertaintyKm: 2, 
+                            updatedAt: new Date().toISOString(), confirmedAt: new Date().toISOString(), status: 'active'
+                        };
+                        setTimeout(() => { fakeTarget = null; }, 30000);
+                    }
+                }, 3000);
+
                 requestAnimationFrame(renderLoop);
             } catch (e) { document.getElementById('errorMsg').textContent = e.message; }
         });
@@ -302,11 +297,31 @@
 
             const now = Date.now();
             let allThreats = [...activeThreats];
+            if (fakeTarget) allThreats.push(fakeTarget);
 
             let closestInFov = null, minDistInFov = Infinity;
             let closestOverall = null, minDistOverall = Infinity;
             const halfFov = currentFov / 2;
             
+            // --- КРОК 1: Прораховуємо всі дані ---
+            let parsedThreats = [];
+            for (const t of allThreats) {
+                const p = NEPTUN.predict(t, now);
+                if (!p || isNaN(p.lat)) continue; 
+                
+                const distKm = NEPTUN.distanceKm(myLat, myLon, p.lat, p.lon);
+                const targetBearing = getBearing(myLat, myLon, p.lat, p.lon);
+                let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
+                
+                parsedThreats.push({ threat: t, predicted: p, distKm, deltaAngle });
+
+                if (distKm <= detectionRadiusKm) {
+                    if (distKm < minDistOverall) { minDistOverall = distKm; closestOverall = { threat: t, predicted: p, delta: deltaAngle }; }
+                    if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) { minDistInFov = distKm; closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm }; }
+                }
+            }
+
+            // --- КРОК 2: Рендеринг міні-карти ---
             ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
             
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; ctx.lineWidth = 1;
@@ -323,8 +338,7 @@
             ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (halfFov * Math.PI/180), -Math.PI/2 + (halfFov * Math.PI/180));
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; ctx.fill();
 
-            ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI); ctx.fillStyle = '#3b82f6'; ctx.fill();
-
+            // Малюємо укриття (зелена точка)
             if (shelters.length > 0) {
                 const s = shelters[0]; 
                 const sDist = NEPTUN.distanceKm(myLat, myLon, s.lat, s.lon);
@@ -345,42 +359,60 @@
                 const spy = cy + (sScale * radarRadius) * Math.sin(sRad);
                 
                 ctx.beginPath(); ctx.arc(spx, spy, 5, 0, 2 * Math.PI);
-                ctx.fillStyle = '#10b981'; 
-                ctx.fill();
+                ctx.fillStyle = '#10b981'; ctx.fill();
                 ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
             }
 
-            for (const t of allThreats) {
-                const p = NEPTUN.predict(t, now);
-                if (!p || isNaN(p.lat)) continue; 
-                
-                const distKm = NEPTUN.distanceKm(myLat, myLon, p.lat, p.lon);
-                const targetBearing = getBearing(myLat, myLon, p.lat, p.lon);
-                let deltaAngle = ((targetBearing - phoneHeading + 540) % 360) - 180;
-                
-                let scale = distKm / maxRadarKm;
+            // Малюємо центр (користувача)
+            ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI); ctx.fillStyle = '#3b82f6'; ctx.fill();
+
+            // Малюємо цілі
+            for (const data of parsedThreats) {
+                let scale = data.distKm / maxRadarKm;
                 if (scale > 1) scale = 1; 
                 
-                const rad = (deltaAngle - 90) * Math.PI / 180;
+                const rad = (data.deltaAngle - 90) * Math.PI / 180;
                 const px = cx + (scale * radarRadius) * Math.cos(rad);
                 const py = cy + (scale * radarRadius) * Math.sin(rad);
                 
-                const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red' };
+                const meta = NEPTUN.getTypeMeta(data.threat.type) || { color: 'red' };
                 
-                ctx.beginPath(); ctx.arc(px, py, 4, 0, 2 * Math.PI); 
-                if (distKm > detectionRadiusKm) {
+                ctx.beginPath(); 
+                if (data.distKm > detectionRadiusKm) {
+                    // Сіра ціль (за зоною виявлення)
                     ctx.fillStyle = 'rgba(156, 163, 175, 0.5)';
+                    ctx.arc(px, py, 4, 0, 2 * Math.PI);
+                    ctx.fill();
                 } else {
                     ctx.fillStyle = meta.color;
-                    if (distKm < minDistOverall) { minDistOverall = distKm; closestOverall = { threat: t, predicted: p, delta: deltaAngle }; }
-                    if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) { minDistInFov = distKm; closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm }; }
+                    
+                    // ПІДСВІЧУЄМО ЗАХОПЛЕНУ ЦІЛЬ
+                    if (closestInFov && closestInFov.threat.id === data.threat.id) {
+                        ctx.arc(px, py, 6, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.lineWidth = 2;
+                        ctx.strokeStyle = '#ffffff'; // Біла обводка
+                        ctx.stroke();
+                        
+                        // Хрестик для акценту
+                        ctx.beginPath();
+                        ctx.moveTo(px - 10, py); ctx.lineTo(px + 10, py);
+                        ctx.moveTo(px, py - 10); ctx.lineTo(px, py + 10);
+                        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    } else {
+                        // Звичайна ціль
+                        ctx.arc(px, py, 4, 0, 2 * Math.PI); 
+                        ctx.fill();
+                    }
                 }
-                ctx.fill();
             }
 
-            // Оновлюємо загальну телеметрію під укриттям
+            // Оновлюємо загальну телеметрію
             debugInfo.innerHTML = `Азимут: ${Math.round(phoneHeading)}°<br>Всіх цілей: ${allThreats.length}`;
 
+            // --- КРОК 3: Логіка Прицілу та HUD ---
             if (closestInFov) {
                 if (!isLocked) {
                     isLocked = true;
