@@ -43,6 +43,9 @@
         
         .slider-red::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer; }
         .slider-red::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #ef4444; cursor: pointer; border: none; }
+
+        /* Анімація для компаса укриття */
+        #shelterDir { display: inline-block; transition: transform 0.2s ease-out; }
     </style>
 </head>
 <body class="text-white relative">
@@ -54,6 +57,7 @@
         <div id="arrowLeft" class="nav-arrow left">←</div>
         <div id="arrowRight" class="nav-arrow right">→</div>
 
+        <!-- HUD Загроз (Центр-Низ) -->
         <div id="targetHUD" class="absolute top-[55%] left-1/2 -translate-x-1/2 bg-black/85 border border-red-500 rounded-lg p-4 w-[90%] max-w-sm hidden flex-col items-center shadow-[0_0_20px_rgba(255,0,0,0.7)]">
             <div id="hudIcon" class="text-4xl mb-1">🎯</div>
             <div id="hudTitle" class="text-red-500 font-bold text-xl uppercase tracking-wider text-center mb-3 border-b border-gray-700 w-full pb-2">Ціль</div>
@@ -70,6 +74,24 @@
             </div>
         </div>
 
+        <!-- НОВЕ: HUD Найближчого укриття (Лівий нижній кут) -->
+        <div id="shelterHUD" class="absolute bottom-6 left-4 bg-black/70 border border-emerald-500/50 rounded-lg p-3 w-48 backdrop-blur-md hidden pointer-events-auto shadow-[0_0_10px_rgba(16,185,129,0.3)]">
+            <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-1">
+                <span class="text-emerald-400 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1">
+                    🛡 Найближче
+                </span>
+                <!-- Стрілка, що буде обертатись -->
+                <span id="shelterDir" class="text-emerald-400 text-lg font-bold">↑</span>
+            </div>
+            <div id="shelterAddress" class="text-white text-xs font-bold truncate mb-2">Шукаю...</div>
+            <div class="grid grid-cols-[50px_1fr] gap-x-2 gap-y-1 w-full text-[10px]">
+                <div class="text-gray-400">Відстань:</div> <div id="shelterDist" class="font-mono font-bold text-right text-white">--</div>
+                <div class="text-gray-400">Тип:</div> <div id="shelterType" class="text-right text-white truncate">--</div>
+                <div class="text-gray-400">Wi-Fi:</div> <div id="shelterWifi" class="font-bold text-right text-emerald-400">--</div>
+            </div>
+        </div>
+
+        <!-- Дебаг та симуляція (Верхній лівий кут) -->
         <div class="absolute top-4 left-4 pointer-events-auto flex flex-col gap-2">
             <button id="btnSimulate" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
                 Симулювати (20км)
@@ -79,6 +101,7 @@
             </div>
         </div>
 
+        <!-- Міні-карта та Панель управління (Верхній правий кут) -->
         <div class="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-auto">
             <div class="w-32 h-32 bg-black/60 border border-slate-700 rounded-full shadow-lg overflow-hidden backdrop-blur-md relative pointer-events-none">
                 <canvas id="radarCanvas" width="128" height="128" class="w-full h-full"></canvas>
@@ -107,6 +130,7 @@
         </div>
     </div>
 
+    <!-- Екран дозволів -->
     <div id="permissionScreen" class="absolute inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6 text-center">
         <h1 class="text-2xl font-bold mb-4">NEPTUN AR Radar</h1>
         <p class="text-sm text-slate-300 mb-6 max-w-sm">Для роботи системи необхідний доступ до компаса, камери та GPS.</p>
@@ -122,6 +146,9 @@
         let myLat = 0, myLon = 0, phoneHeading = 0;
         let activeThreats = [], fakeTarget = null, isLocked = false;
         let audioCtx = null, lastBeep = 0, client = null;
+        
+        // База укриттів
+        let shelters = [];
 
         const uiLayer = document.getElementById('uiLayer');
         const crosshair = document.getElementById('crosshair');
@@ -129,6 +156,7 @@
         const arrowLeft = document.getElementById('arrowLeft');
         const arrowRight = document.getElementById('arrowRight');
         const debugInfo = document.getElementById('debugInfo');
+        const shelterHUD = document.getElementById('shelterHUD');
         
         const radarCanvas = document.getElementById('radarCanvas');
         const ctx = radarCanvas.getContext('2d');
@@ -147,17 +175,13 @@
             maxRadarKm = parseInt(e.target.value);
             document.getElementById('radarLabel').textContent = maxRadarKm + ' км';
         });
-        
         document.getElementById('fovSlider').addEventListener('input', (e) => {
             currentFov = parseInt(e.target.value);
             document.getElementById('fovLabel').textContent = currentFov + '°';
         });
-        
         detSlider.addEventListener('input', (e) => {
             detectionRadiusKm = parseInt(e.target.value);
             document.getElementById('detLabel').textContent = detectionRadiusKm + ' км';
-            
-            // Авто-розширення карти, якщо радіус захоплення більший за видимість
             if (detectionRadiusKm > maxRadarKm) {
                 maxRadarKm = detectionRadiusKm;
                 radarZoom.value = maxRadarKm;
@@ -210,7 +234,20 @@
                 document.getElementById('cameraFeed').srcObject = stream;
 
                 navigator.geolocation.watchPosition(
-                    (pos) => { myLat = pos.coords.latitude; myLon = pos.coords.longitude; },
+                    (pos) => { 
+                        const firstFix = (myLat === 0);
+                        myLat = pos.coords.latitude; myLon = pos.coords.longitude; 
+                        
+                        // Генеруємо тестове укриття поруч при першому отриманні GPS
+                        if (firstFix) {
+                            const p = NEPTUN.dest(myLat, myLon, 45, 0.25); // 250 метрів на Північний Схід
+                            shelters = [{
+                                lat: p.lat, lon: p.lon,
+                                address: "Вул. Центральна, 15", type: "Підвал школи", wifi: true
+                            }];
+                            shelterHUD.classList.remove('hidden');
+                        }
+                    },
                     (err) => { alert("GPS: " + err.message); }, { enableHighAccuracy: true }
                 );
 
@@ -250,37 +287,57 @@
 
             let closestInFov = null, minDistInFov = Infinity;
             let closestOverall = null, minDistOverall = Infinity;
-            
             const halfFov = currentFov / 2;
             
             ctx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
             
+            // Відмальовка сітки
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius * 0.5, 0, 2 * Math.PI); ctx.stroke();
             ctx.beginPath(); ctx.arc(cx, cy, radarRadius, 0, 2 * Math.PI); ctx.stroke();
 
-            // ВИПРАВЛЕНЕ: Червоне пунктирне кільце (Радіус виявлення)
             const detScale = detectionRadiusKm / maxRadarKm;
-            // Притискаємо лінію до краю, якщо радіус більший за видиму карту
             const drawRadius = Math.min(detScale * radarRadius, radarRadius);
             
-            ctx.beginPath();
-            ctx.arc(cx, cy, drawRadius, 0, 2 * Math.PI);
-            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
-            // Робимо лінію товщою, якщо вона притиснута до краю (як попередження)
-            ctx.lineWidth = (detScale > 1) ? 3 : 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.beginPath(); ctx.arc(cx, cy, drawRadius, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; ctx.lineWidth = (detScale > 1) ? 3 : 1.5;
+            ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
 
-            // Білий конус
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (halfFov * Math.PI/180), -Math.PI/2 + (halfFov * Math.PI/180));
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, radarRadius, -Math.PI/2 - (halfFov * Math.PI/180), -Math.PI/2 + (halfFov * Math.PI/180));
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; ctx.fill();
 
             ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI); ctx.fillStyle = '#3b82f6'; ctx.fill();
 
+            // Відмальовка укриттів на радарі та оновлення HUD
+            if (shelters.length > 0) {
+                const s = shelters[0]; // Беремо найближче
+                const sDist = NEPTUN.distanceKm(myLat, myLon, s.lat, s.lon);
+                const sBear = getBearing(myLat, myLon, s.lat, s.lon);
+                let sDelta = ((sBear - phoneHeading + 540) % 360) - 180;
+                
+                // Обертаємо стрілку напрямку до укриття
+                document.getElementById('shelterDir').style.transform = `rotate(${sDelta}deg)`;
+                
+                document.getElementById('shelterAddress').textContent = s.address;
+                document.getElementById('shelterDist').textContent = sDist < 1 ? Math.round(sDist * 1000) + ' м' : sDist.toFixed(1) + ' км';
+                document.getElementById('shelterType').textContent = s.type;
+                document.getElementById('shelterWifi').textContent = s.wifi ? 'Є' : 'Немає';
+                document.getElementById('shelterWifi').className = s.wifi ? 'font-bold text-right text-emerald-400' : 'text-right text-gray-500';
+
+                // Малюємо на радарі (зелена точка)
+                let sScale = sDist / maxRadarKm;
+                if (sScale > 1) sScale = 1;
+                const sRad = (sDelta - 90) * Math.PI / 180;
+                const spx = cx + (sScale * radarRadius) * Math.cos(sRad);
+                const spy = cy + (sScale * radarRadius) * Math.sin(sRad);
+                
+                ctx.beginPath(); ctx.arc(spx, spy, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = '#10b981'; // emerald-500
+                ctx.fill();
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+            }
+
+            // Відмальовка загроз
             for (const t of allThreats) {
                 const p = NEPTUN.predict(t, now);
                 if (!p || isNaN(p.lat)) continue; 
@@ -298,14 +355,11 @@
                 
                 const meta = NEPTUN.getTypeMeta(t.type) || { color: 'red' };
                 
-                ctx.beginPath(); 
-                ctx.arc(px, py, 4, 0, 2 * Math.PI); 
-                
+                ctx.beginPath(); ctx.arc(px, py, 4, 0, 2 * Math.PI); 
                 if (distKm > detectionRadiusKm) {
-                    ctx.fillStyle = 'rgba(156, 163, 175, 0.5)'; // Сірий (поза зоною виявлення)
+                    ctx.fillStyle = 'rgba(156, 163, 175, 0.5)';
                 } else {
-                    ctx.fillStyle = meta.color; // Активний
-                    
+                    ctx.fillStyle = meta.color;
                     if (distKm < minDistOverall) { minDistOverall = distKm; closestOverall = { threat: t, predicted: p, delta: deltaAngle }; }
                     if (Math.abs(deltaAngle) <= halfFov && distKm < minDistInFov) { minDistInFov = distKm; closestInFov = { threat: t, predicted: p, delta: deltaAngle, dist: distKm }; }
                 }
@@ -331,8 +385,7 @@
                 document.getElementById('hudTitle').textContent = t.title || meta.title;
                 document.getElementById('hudTitle').style.color = meta.color;
                 
-                const locationText = t.locality || t.district || t.region || "Невідомо";
-                document.getElementById('hudLoc').textContent = locationText;
+                document.getElementById('hudLoc').textContent = t.locality || t.district || t.region || "Невідомо";
                 document.getElementById('hudCourse').textContent = t.explanationShort || "--";
                 
                 const compassStr = getCompassDirection(t.heading);
